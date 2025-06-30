@@ -1,13 +1,10 @@
 
 import React from 'react';
-import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useOllama } from '@/hooks/useOllama';
 import { useProjectStore } from '@/stores/projectStore';
+import { AIProviderSelector } from '@/components/AIProviderSelector';
 import { Bolt } from 'lucide-react';
 
 export const Header = () => {
-  const { models, selectedModel, setSelectedModel, isConnected } = useOllama();
   const { projectName, setProjectName } = useProjectStore();
 
   return (
@@ -29,28 +26,7 @@ export const Header = () => {
         />
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-400">Model:</span>
-          <Select value={selectedModel} onValueChange={setSelectedModel}>
-            <SelectTrigger className="w-48 bg-gray-700 border-gray-600">
-              <SelectValue placeholder="Select model" />
-            </SelectTrigger>
-            <SelectContent>
-              {models.map((model) => (
-                <SelectItem key={model} value={model}>
-                  {model}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        
-        <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-sm text-gray-400">
-          {isConnected ? 'Connected' : 'Disconnected'}
-        </span>
-      </div>
+      <AIProviderSelector />
     </header>
   );
 };
