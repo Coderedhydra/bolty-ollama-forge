@@ -34,7 +34,17 @@ export const useAIProviders = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Update connection state when provider or model changes
+  useEffect(() => {
+    if (selectedProvider && selectedModel) {
+      setIsConnected(true);
+    } else {
+      setIsConnected(false);
+    }
+  }, [selectedProvider, selectedModel]);
+
   const checkConnection = useCallback(async (provider: AIProvider) => {
+    setIsLoading(true);
     try {
       switch (provider.type) {
         case 'ollama':
@@ -49,13 +59,19 @@ export const useAIProviders = () => {
               supportsCodeGeneration: true,
             }));
             setModels(ollamaModels);
-            setIsConnected(true);
+            // Auto-select the first model if available
+            if (ollamaModels.length > 0) {
+              setSelectedModel(ollamaModels[0]);
+            }
             return true;
           }
           break;
         
         case 'openai':
-          if (!apiKey) return false;
+          if (!apiKey) {
+            setIsConnected(false);
+            return false;
+          }
           const openaiResponse = await fetch(`${provider.baseUrl}/models`, {
             headers: { Authorization: `Bearer ${apiKey}` },
           });
@@ -71,18 +87,25 @@ export const useAIProviders = () => {
                 supportsCodeGeneration: true,
               }));
             setModels(openaiModels);
-            setIsConnected(true);
+            // Auto-select GPT-4 if available, otherwise first model
+            const preferredModel = openaiModels.find((m: any) => m.id.includes('gpt-4')) || openaiModels[0];
+            if (preferredModel) {
+              setSelectedModel(preferredModel);
+            }
             return true;
           }
           break;
 
         case 'anthropic':
-          if (!apiKey) return false;
-          // For Anthropic, we'll set predefined models
+          if (!apiKey) {
+            setIsConnected(false);
+            return false;
+          }
+          // For Anthropic, we'll set predefined models since they don't have a models endpoint
           const anthropicModels = [
             {
-              id: 'claude-3-sonnet-20240229',
-              name: 'Claude 3 Sonnet',
+              id: 'claude-3-5-sonnet-20241022',
+              name: 'Claude 3.5 Sonnet',
               provider: provider.id,
               contextLength: 200000,
               supportsCodeGeneration: true,
@@ -96,16 +119,45 @@ export const useAIProviders = () => {
             },
           ];
           setModels(anthropicModels);
-          setIsConnected(true);
+          // Auto-select the first model
+          setSelectedModel(anthropicModels[0]);
           return true;
       }
     } catch (error) {
       console.error(`Failed to connect to ${provider.name}:`, error);
+      setIsConnected(false);
+      setModels([]);
+      setSelectedModel(null);
+      return false;
+    } finally {
+      setIsLoading(false);
     }
     
     setIsConnected(false);
+    setModels([]);
+    setSelectedModel(null);
     return false;
   }, [apiKey]);
+
+  // Custom setter for selectedProvider that also triggers connection check
+  const handleSetSelectedProvider = useCallback(async (provider: AIProvider | null) => {
+    setSelectedProvider(provider);
+    setSelectedModel(null);
+    setModels([]);
+    setIsConnected(false);
+    
+    if (provider) {
+      await checkConnection(provider);
+    }
+  }, [checkConnection]);
+
+  // Custom setter for selectedModel that updates connection state
+  const handleSetSelectedModel = useCallback((model: AIModel | null) => {
+    setSelectedModel(model);
+    if (model && selectedProvider) {
+      setIsConnected(true);
+    }
+  }, [selectedProvider]);
 
   const generateCode = useCallback(async (request: CodeGenerationRequest): Promise<CodeGenerationResponse> => {
     if (!selectedProvider || !selectedModel || !isConnected) {
@@ -257,8 +309,8 @@ ${request.currentFile ? `Current file: ${request.currentFile}` : ''}`;
     apiKey,
     isConnected,
     isLoading,
-    setSelectedProvider,
-    setSelectedModel,
+    setSelectedProvider: handleSetSelectedProvider,
+    setSelectedModel: handleSetSelectedModel,
     setApiKey,
     checkConnection,
     generateCode,
