@@ -4,7 +4,7 @@ An intelligent web application vulnerability scanner that uses AI (Gemini and Ol
 
 ## Features
 
-🤖 **AI-Powered Analysis**: Uses Gemini 2.0 Flash and Ollama models to intelligently analyze targets and generate context-specific payloads
+🤖 **AI-Powered Analysis**: Uses Gemini 2.5 Flash and Ollama models to intelligently analyze targets and generate context-specific payloads
 
 🕸️ **Smart Web Crawling**: Automatically discovers internal links and forms with depth-based crawling
 
@@ -67,7 +67,7 @@ cp .env.example .env
 export GEMINI_API_KEY="your_api_key_here"
 ```
 
-**Note**: The scanner uses Gemini 2.0 Flash by default for faster and more cost-effective analysis.
+**Note**: The scanner uses Gemini 2.5 Flash by default for faster and more cost-effective analysis.
 
 #### Ollama (Local AI)
 1. Install [Ollama](https://ollama.ai/)
@@ -88,7 +88,7 @@ Create a `.env` file or set environment variables:
 # AI Configuration
 GEMINI_API_KEY=your_gemini_api_key
 OLLAMA_HOST=http://localhost:11434
-GEMINI_MODEL=gemini-2.0-flash-exp
+GEMINI_MODEL=gemini-2.5-flash
 OLLAMA_MODEL=llama2
 
 # Scanner Settings
@@ -162,7 +162,7 @@ python main.py -u http://example.com -o detailed_report.html --depth 3 --verbose
 - Respects depth limits and rate limiting
 
 ### 2. AI Analysis
-- Sends discovered endpoints and forms to AI models (Gemini 2.0 Flash by default)
+- Sends discovered endpoints and forms to AI models (Gemini 2.5 Flash by default)
 - AI analyzes the target and provides:
   - Priority endpoints to test
   - Recommended vulnerability types for each endpoint
@@ -194,7 +194,7 @@ python main.py -u http://example.com -o detailed_report.html --depth 3 --verbose
 [*] Initializing AI-powered vulnerability scanner...
 [✓] Configuration loaded
 [✓] Available AI models: gemini, ollama
-[✓] Gemini API configured (using gemini-2.0-flash-exp)
+[✓] Gemini API configured (using gemini-2.5-flash)
 
 🤖 Starting AI-powered intelligent vulnerability scan
 ✅ AI analysis completed, beginning targeted testing
@@ -251,7 +251,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 **"Gemini API error"**
 - Verify your API key is correct
 - Check your API quota/billing status
-- Ensure you're using a supported model (gemini-2.0-flash-exp is recommended)
+- Ensure you're using a supported model (gemini-2.5-flash is recommended)
 
 **"Ollama connection failed"**
 - Ensure Ollama is running: `ollama serve`
@@ -277,11 +277,12 @@ tail -f vulnerability_scan.log
 
 ## Model Information
 
-### Gemini 2.0 Flash (Default)
+### Gemini 2.5 Flash (Default)
+- **Latest Model**: Most advanced Flash model from Google
 - **Faster**: Optimized for speed and efficiency
 - **Cost-effective**: Lower API costs compared to Pro models
-- **Reliable**: Excellent for vulnerability analysis tasks
-- **Model ID**: `gemini-2.0-flash-exp`
+- **Enhanced Capabilities**: Better reasoning and analysis
+- **Model ID**: `gemini-2.5-flash`
 
 To use a different Gemini model, set the environment variable:
 ```bash
