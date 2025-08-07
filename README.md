@@ -4,6 +4,22 @@ An intelligent web application vulnerability scanner that uses AI (Gemini and Ol
 
 ## Features
 
+🤖 **AI-Powered Analysis**: Uses Gemini 2.0 Flash and Ollama models to intelligently analyze targets and generate context-specific payloads
+
+🕸️ **Smart Web Crawling**: Automatically discovers internal links and forms with depth-based crawling
+
+🎯 **Targeted Testing**: AI decides which endpoints to prioritize and what vulnerability types to test
+
+🔍 **Progressive Testing**: Escalates from basic to advanced payloads based on vulnerability indicators
+
+🧠 **Intelligent Response Analysis**: AI analyzes responses to determine actual vulnerability presence
+
+📊 **Beautiful Reporting**: Console output with colors, tables, and HTML/JSON reports
+
+🔧 **Highly Configurable**: Extensive configuration options for scan depth, AI models, and testing parameters
+
+## Features
+
 🤖 **AI-Powered Analysis**: Uses Gemini API and Ollama models to intelligently analyze targets and generate context-specific payloads
 
 🕸️ **Smart Web Crawling**: Automatically discovers internal links and forms with depth-based crawling
@@ -51,6 +67,8 @@ cp .env.example .env
 export GEMINI_API_KEY="your_api_key_here"
 ```
 
+**Note**: The scanner uses Gemini 2.0 Flash by default for faster and more cost-effective analysis.
+
 #### Ollama (Local AI)
 1. Install [Ollama](https://ollama.ai/)
 2. Pull a model:
@@ -70,7 +88,7 @@ Create a `.env` file or set environment variables:
 # AI Configuration
 GEMINI_API_KEY=your_gemini_api_key
 OLLAMA_HOST=http://localhost:11434
-GEMINI_MODEL=gemini-pro
+GEMINI_MODEL=gemini-2.0-flash-exp
 OLLAMA_MODEL=llama2
 
 # Scanner Settings
@@ -144,7 +162,7 @@ python main.py -u http://example.com -o detailed_report.html --depth 3 --verbose
 - Respects depth limits and rate limiting
 
 ### 2. AI Analysis
-- Sends discovered endpoints and forms to AI models
+- Sends discovered endpoints and forms to AI models (Gemini 2.0 Flash by default)
 - AI analyzes the target and provides:
   - Priority endpoints to test
   - Recommended vulnerability types for each endpoint
@@ -153,16 +171,16 @@ python main.py -u http://example.com -o detailed_report.html --depth 3 --verbose
 
 ### 3. Intelligent Testing
 - Generates context-specific payloads using AI
+- Progressive testing: basic → intermediate → advanced
 - Tests multiple injection points:
   - Query parameters
   - Form fields
   - URL paths
-  - HTTP headers
-- Analyzes responses for vulnerability indicators
+- AI analyzes responses for vulnerability indicators
 
 ### 4. Reporting
 - Real-time console output with colors and progress
-- Detailed vulnerability reports
+- Detailed vulnerability reports with confidence scores
 - JSON and HTML export options
 
 ## Example Output
@@ -176,58 +194,22 @@ python main.py -u http://example.com -o detailed_report.html --depth 3 --verbose
 [*] Initializing AI-powered vulnerability scanner...
 [✓] Configuration loaded
 [✓] Available AI models: gemini, ollama
-[✓] Gemini API configured
+[✓] Gemini API configured (using gemini-2.0-flash-exp)
 
-[*] Starting web crawling...
+🤖 Starting AI-powered intelligent vulnerability scan
+✅ AI analysis completed, beginning targeted testing
+🎯 Testing 5 high-priority endpoints
 
-============================================================
-            CRAWLING SUMMARY
-============================================================
-Target URL: http://example.com
-Pages Visited: 15
-Links Found: 47
-Forms Found: 3
+Testing high-priority endpoint: /login (Priority: 9, Confidence: 0.85)
+Testing for: sql_injection, xss
+Testing /login with basic sql_injection payloads
 
-[*] Interesting endpoints found:
-  • http://example.com/admin (admin_endpoint)
-  • http://example.com/login (admin_endpoint)
-  • http://example.com/api/users (api_endpoint)
+🚨 VULNERABILITY FOUND: sql_injection in /login
+   Level: basic, Payload: ' OR '1'='1
+   Confidence: 0.78
+   High confidence vulnerability found. Escalating to intermediate level testing.
 
-[*] Running AI analysis...
-
-============================================================
-            AI ANALYSIS RESULTS
-============================================================
-
-[*] High Priority Targets:
-+------------------+----------+---------------------+------------------------+
-| URL              | Priority | Vulnerability Types | Reasoning              |
-+==================+==========+=====================+========================+
-| /admin           | 9/10     | sql_injection, xss  | Admin interface with   |
-|                  |          |                     | high privilege access |
-+------------------+----------+---------------------+------------------------+
-
-[*] Starting intelligent vulnerability scan...
-
-VULNERABILITY FOUND: sql_injection in http://example.com/login
-Payload: ' OR '1'='1
-Confidence: 0.85
-
-============================================================
-            VULNERABILITY SCAN RESULTS
-============================================================
-
-[!] Found 2 potential vulnerabilities
-
-[*] Vulnerabilities by Type:
-  • Sql Injection: 1
-  • Xss: 1
-
-[*] Severity Breakdown:
-  • Critical: 1
-  • Medium: 1
-
-[!] SCAN COMPLETE: Found 2 potential vulnerabilities
+[!] SCAN COMPLETE: Found 2 confirmed vulnerabilities
 [!] Please manually verify all findings before taking action
 ```
 
@@ -269,7 +251,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 **"Gemini API error"**
 - Verify your API key is correct
 - Check your API quota/billing status
-- Ensure you're using a supported model
+- Ensure you're using a supported model (gemini-2.0-flash-exp is recommended)
 
 **"Ollama connection failed"**
 - Ensure Ollama is running: `ollama serve`
@@ -291,6 +273,19 @@ python main.py -u http://example.com --verbose
 Check the log file for detailed information:
 ```bash
 tail -f vulnerability_scan.log
+```
+
+## Model Information
+
+### Gemini 2.0 Flash (Default)
+- **Faster**: Optimized for speed and efficiency
+- **Cost-effective**: Lower API costs compared to Pro models
+- **Reliable**: Excellent for vulnerability analysis tasks
+- **Model ID**: `gemini-2.0-flash-exp`
+
+To use a different Gemini model, set the environment variable:
+```bash
+export GEMINI_MODEL="gemini-pro"  # or other supported model
 ```
 
 ## Roadmap

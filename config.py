@@ -17,7 +17,7 @@ class Config(BaseModel):
     user_agent: str = os.getenv("USER_AGENT", "VulnScanner/1.0")
     
     # LLM Settings
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-pro")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "llama2")
     max_tokens: int = int(os.getenv("MAX_TOKENS", "1000"))
     temperature: float = float(os.getenv("TEMPERATURE", "0.7"))
